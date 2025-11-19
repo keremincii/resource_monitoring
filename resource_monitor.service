@@ -1,0 +1,12 @@
+[Unit]
+Description=Resource Monitor Service
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/resource_monitoring
+ExecStart=/usr/bin/python3 /opt/resource_monitoring/resource_monitor.py
+User=root
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
