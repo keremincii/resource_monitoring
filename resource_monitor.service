@@ -1,10 +1,10 @@
 [Unit]
-Description=Resource Monitor Service
+Description=Resource Monitor Service (Go Version)
 After=network.target
 
 [Service]
 WorkingDirectory=/opt/resource_monitoring
-ExecStart=/usr/bin/python3 /opt/resource_monitoring/resource_monitor.py
+ExecStart=/opt/resource_monitoring/resource_monitor
 User=root
 Restart=always
 
