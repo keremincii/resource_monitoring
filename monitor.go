@@ -18,8 +18,8 @@ var (
 	ppsIn1h, ppsIn24h   int
 	drop1h, drop24h     int
 	sq1h, sq24h         int
-	
-	// Zaman damgaları (String olarak saklıyoruz)
+
+	// Zaman damgaları
 	cpu1hTime, cpu24hTime     string
 	ram1hTime, ram24hTime     string
 	conn1hTime, conn24hTime   string
@@ -44,7 +44,8 @@ func main() {
 	getSoftnetStats()
 	getCPUUsage()
 
-	ticker := time.NewTicker(500 * time.Millisecond) // 0.5 saniye
+	// 0.5 Saniyelik Ticker
+	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -71,7 +72,7 @@ func main() {
 
 		prevTotal, prevDrop, prevSq = total, drop, sq
 
-		// 2. MAX Güncelleme
+		// 2. MAX Güncelleme (Hem 1H hem 24H için)
 		updateMax(&cpu1h, &cpu1hTime, cpu, nowStr)
 		updateMax(&cpu24h, &cpu24hTime, cpu, nowStr)
 
@@ -92,12 +93,17 @@ func main() {
 
 		// 3. Sıfırlama Mantığı (1H)
 		if time.Since(tStart1h).Hours() >= 1 {
-			resetStats() // Basitlik için tümünü sıfırla ya da tek tek
+			resetStats1h()
 			tStart1h = time.Now()
 		}
-		// (24H mantığı benzer şekilde eklenebilir, kod uzamasın diye kısalttım)
 
-		// 4. Log Yazma (Saniyede 1 kere)
+		// 4. Sıfırlama Mantığı (24H)
+		if time.Since(tStart24h).Hours() >= 24 {
+			resetStats24h()
+			tStart24h = time.Now()
+		}
+
+		// 5. Log Yazma (Saniyede 1 kere)
 		if time.Since(lastLog).Seconds() >= 1.0 {
 			writeLog(nowStr, cpu, ram, conns, ppsIn, ppsDrop, ppsSq)
 			lastLog = time.Now()
@@ -129,21 +135,35 @@ func writeLog(nowStr string, cpu, ram float64, conns, ppsIn, ppsDrop, ppsSq int)
 	defer f.Close()
 
 	w := bufio.NewWriter(f)
+	// Başlık ve Anlık Durum
 	fmt.Fprintf(w, "[%s] Monitor Status\n", time.Now().Format("2006-01-02 15:04:05"))
 	fmt.Fprintf(w, "CPU: %.1f%% | RAM: %.1f%% | CONN: %d\n", cpu, ram, conns)
 	fmt.Fprintf(w, "PPS_IN: %d | DROP: %d | SQUEEZE: %d\n", ppsIn, ppsDrop, ppsSq)
 	fmt.Fprintln(w, strings.Repeat("-", 52))
 	
+	// 1 Saatlik İstatistikler
 	fmt.Fprintf(w, "CPU_1H_MAX: %.1f%% (%s)\n", cpu1h, cpu1hTime)
 	fmt.Fprintf(w, "RAM_1H_MAX: %.1f%% (%s)\n", ram1h, ram1hTime)
 	fmt.Fprintf(w, "CONN_1H_MAX: %d (%s)\n", conn1h, conn1hTime)
+	fmt.Fprintf(w, "\n")
 	fmt.Fprintf(w, "PPS_IN_1H_MAX: %d (%s)\n", ppsIn1h, ppsIn1hTime)
 	fmt.Fprintf(w, "PPS_DROP_1H_MAX: %d (%s)\n", drop1h, drop1hTime)
+	fmt.Fprintf(w, "SQUEEZE_1H_MAX: %d (%s)\n", sq1h, sq1hTime)
+
+	// 24 Saatlik İstatistikler (EKSİKSİZ)
+	fmt.Fprintf(w, "\n--- 24H STATS ---\n")
+	fmt.Fprintf(w, "CPU_24H_MAX: %.1f%% (%s)\n", cpu24h, cpu24hTime)
+	fmt.Fprintf(w, "RAM_24H_MAX: %.1f%% (%s)\n", ram24h, ram24hTime)
+	fmt.Fprintf(w, "CONN_24H_MAX: %d (%s)\n", conn24h, conn24hTime)
+	fmt.Fprintf(w, "\n")
+	fmt.Fprintf(w, "PPS_IN_24H_MAX: %d (%s)\n", ppsIn24h, ppsIn24hTime)
+	fmt.Fprintf(w, "PPS_DROP_24H_MAX: %d (%s)\n", drop24h, drop24hTime)
+	fmt.Fprintf(w, "SQUEEZE_24H_MAX: %d (%s)\n", sq24h, sq24hTime)
 	
 	w.Flush()
 }
 
-// Linux /proc/net/sockstat okur (Hızlıdır)
+// Linux /proc/net/sockstat okur (Hızlıdır, CPU harcamaz)
 func getConnectionCount() int {
 	data, err := ioutil.ReadFile("/proc/net/sockstat")
 	if err != nil { return 0 }
@@ -212,7 +232,7 @@ func getCPUUsage() float64 {
 	if err != nil { return 0 }
 	
 	lines := strings.Split(string(data), "\n")
-	fields := strings.Fields(lines[0]) // "cpu  user nice system idle..."
+	fields := strings.Fields(lines[0])
 	
 	if len(fields) < 5 { return 0 }
 
@@ -233,7 +253,16 @@ func getCPUUsage() float64 {
 	return 100 * (1 - (diffIdle / diffTotal))
 }
 
-func resetStats() {
+func resetStats1h() {
 	cpu1h = 0; ram1h = 0; conn1h = 0
 	ppsIn1h = 0; drop1h = 0; sq1h = 0
+	cpu1hTime = ""; ram1hTime = ""; conn1hTime = ""
+	ppsIn1hTime = ""; drop1hTime = ""; sq1hTime = ""
+}
+
+func resetStats24h() {
+	cpu24h = 0; ram24h = 0; conn24h = 0
+	ppsIn24h = 0; drop24h = 0; sq24h = 0
+	cpu24hTime = ""; ram24hTime = ""; conn24hTime = ""
+	ppsIn24hTime = ""; drop24hTime = ""; sq24hTime = ""
 }
