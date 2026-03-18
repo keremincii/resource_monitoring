@@ -34,11 +34,11 @@ var (
 	prevTotal, prevDrop, prevSq int = -1, -1, -1
 )
 
-const logPath = "/home/log/resource.log"
+const logPath = "/var/log/resource.log"
 
 func main() {
 	// Log klasörünü oluştur
-	_ = os.MkdirAll("/home/log", 0755)
+	_ = os.MkdirAll("/var/log", 0755)
 
 	// Isınma turu için ilk okuma
 	getSoftnetStats()
