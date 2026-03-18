@@ -3,8 +3,8 @@ Description=Resource Monitor Service (Go Version)
 After=network.target
 
 [Service]
-WorkingDirectory=/opt/resource_monitoring
-ExecStart=/opt/resource_monitoring/resource_monitor
+WorkingDirectory=/root/resource_monitoring
+ExecStart=/root/resource_monitoring/resource_monitor
 User=root
 Restart=always
 
