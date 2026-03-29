@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -10,35 +9,89 @@ import (
 	"time"
 )
 
-// Global değişkenler (Max takibi için)
+// StatInt represents a monitored integer metric and its maximums
+type StatInt struct {
+	Max     int
+	MaxTime string
+}
+
+func (s *StatInt) UpdateMax(val int, nowStr string) {
+	if s.Max == 0 || val > s.Max {
+		s.Max = val
+		s.MaxTime = nowStr
+	}
+}
+
+func (s *StatInt) Reset() {
+	s.Max = 0
+	s.MaxTime = ""
+}
+
+// StatFloat represents a monitored float metric and its maximums
+type StatFloat struct {
+	Max     float64
+	MaxTime string
+}
+
+func (s *StatFloat) UpdateMax(val float64, nowStr string) {
+	if s.Max == 0 || val > s.Max {
+		s.Max = val
+		s.MaxTime = nowStr
+	}
+}
+
+func (s *StatFloat) Reset() {
+	s.Max = 0
+	s.MaxTime = ""
+}
+
+// MonitorStats holds all tracking variables
+type MonitorStats struct {
+	CPU      StatFloat
+	RAM      StatFloat
+	Conn     StatInt
+	PPSIn    StatInt
+	PPSDrop  StatInt
+	PPSSq    StatInt
+}
+
+func (m *MonitorStats) Reset() {
+	m.CPU.Reset()
+	m.RAM.Reset()
+	m.Conn.Reset()
+	m.PPSIn.Reset()
+	m.PPSDrop.Reset()
+	m.PPSSq.Reset()
+}
+
 var (
-	cpu1h, cpu24h       float64
-	ram1h, ram24h       float64
-	conn1h, conn24h     int
-	ppsIn1h, ppsIn24h   int
-	drop1h, drop24h     int
-	sq1h, sq24h         int
+	stats1h  = MonitorStats{}
+	stats24h = MonitorStats{}
 
-	// Zaman damgaları
-	cpu1hTime, cpu24hTime     string
-	ram1hTime, ram24hTime     string
-	conn1hTime, conn24hTime   string
-	ppsIn1hTime, ppsIn24hTime string
-	drop1hTime, drop24hTime   string
-	sq1hTime, sq24hTime       string
-
-	tStart1h  = time.Now()
-	tStart24h = time.Now()
-	lastLog   = time.Now()
+	tStart1h  time.Time
+	tStart24h time.Time
+	lastLog   time.Time
+	loc       *time.Location
 
 	prevTotal, prevDrop, prevSq int = -1, -1, -1
 )
 
-const logPath = "/home/log/resource.log"
+const logPath = "/var/log/resource.log"
 
 func main() {
+	// 1. Saat dilimi ayarı (TRT)
+	var err error
+	loc, err = time.LoadLocation("Europe/Istanbul")
+	if err != nil {
+		loc = time.FixedZone("TRT", 3*3600)
+	}
+
+	tStart1h = time.Now().In(loc)
+	tStart24h = time.Now().In(loc)
+	lastLog = time.Now().In(loc)
+
 	// Log klasörünü oluştur
-	_ = os.MkdirAll("/home/log", 0755)
+	_ = os.MkdirAll("/var/log", 0755)
 
 	// Isınma turu için ilk okuma
 	getSoftnetStats()
@@ -49,7 +102,7 @@ func main() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		now := time.Now()
+		now := time.Now().In(loc)
 		nowStr := now.Format("15:04:05")
 
 		// 1. Verileri Topla
@@ -65,6 +118,7 @@ func main() {
 			ppsDrop = drop - prevDrop
 			ppsSq = sq - prevSq
 		}
+		
 		// Negatif koruması
 		if ppsIn < 0 { ppsIn = 0 }
 		if ppsDrop < 0 { ppsDrop = 0 }
@@ -72,101 +126,102 @@ func main() {
 
 		prevTotal, prevDrop, prevSq = total, drop, sq
 
-		// 2. MAX Güncelleme (Hem 1H hem 24H için)
-		updateMax(&cpu1h, &cpu1hTime, cpu, nowStr)
-		updateMax(&cpu24h, &cpu24hTime, cpu, nowStr)
+		// 2. MAX Güncelleme
+		stats1h.CPU.UpdateMax(cpu, nowStr)
+		stats24h.CPU.UpdateMax(cpu, nowStr)
 
-		updateMax(&ram1h, &ram1hTime, ram, nowStr)
-		updateMax(&ram24h, &ram24hTime, ram, nowStr)
+		stats1h.RAM.UpdateMax(ram, nowStr)
+		stats24h.RAM.UpdateMax(ram, nowStr)
 
-		updateMaxInt(&conn1h, &conn1hTime, conns, nowStr)
-		updateMaxInt(&conn24h, &conn24hTime, conns, nowStr)
+		stats1h.Conn.UpdateMax(conns, nowStr)
+		stats24h.Conn.UpdateMax(conns, nowStr)
 
-		updateMaxInt(&ppsIn1h, &ppsIn1hTime, ppsIn, nowStr)
-		updateMaxInt(&ppsIn24h, &ppsIn24hTime, ppsIn, nowStr)
+		stats1h.PPSIn.UpdateMax(ppsIn, nowStr)
+		stats24h.PPSIn.UpdateMax(ppsIn, nowStr)
 
-		updateMaxInt(&drop1h, &drop1hTime, ppsDrop, nowStr)
-		updateMaxInt(&drop24h, &drop24hTime, ppsDrop, nowStr)
+		stats1h.PPSDrop.UpdateMax(ppsDrop, nowStr)
+		stats24h.PPSDrop.UpdateMax(ppsDrop, nowStr)
 
-		updateMaxInt(&sq1h, &sq1hTime, ppsSq, nowStr)
-		updateMaxInt(&sq24h, &sq24hTime, ppsSq, nowStr)
+		stats1h.PPSSq.UpdateMax(ppsSq, nowStr)
+		stats24h.PPSSq.UpdateMax(ppsSq, nowStr)
 
 		// 3. Sıfırlama Mantığı (1H)
 		if time.Since(tStart1h).Hours() >= 1 {
-			resetStats1h()
-			tStart1h = time.Now()
+			stats1h.Reset()
+			tStart1h = time.Now().In(loc)
 		}
 
 		// 4. Sıfırlama Mantığı (24H)
 		if time.Since(tStart24h).Hours() >= 24 {
-			resetStats24h()
-			tStart24h = time.Now()
+			stats24h.Reset()
+			tStart24h = time.Now().In(loc)
 		}
 
 		// 5. Log Yazma (Saniyede 1 kere)
 		if time.Since(lastLog).Seconds() >= 1.0 {
-			writeLog(nowStr, cpu, ram, conns, ppsIn, ppsDrop, ppsSq)
-			lastLog = time.Now()
+			writeDashboardLog(nowStr, cpu, ram, conns, ppsIn, ppsDrop, ppsSq)
+			lastLog = time.Now().In(loc)
 		}
 	}
 }
 
-// --- YARDIMCI FONKSİYONLAR ---
-
-func updateMax(maxVal *float64, maxTime *string, curr float64, nowStr string) {
-	if *maxVal == 0 || curr > *maxVal {
-		*maxVal = curr
-		*maxTime = nowStr
-	}
-}
-
-func updateMaxInt(maxVal *int, maxTime *string, curr int, nowStr string) {
-	if *maxVal == 0 || curr > *maxVal {
-		*maxVal = curr
-		*maxTime = nowStr
-	}
-}
-
-func writeLog(nowStr string, cpu, ram float64, conns, ppsIn, ppsDrop, ppsSq int) {
-	f, err := os.Create(logPath)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	w := bufio.NewWriter(f)
-	// Başlık ve Anlık Durum
-	fmt.Fprintf(w, "[%s] Monitor Status\n", time.Now().Format("2006-01-02 15:04:05"))
-	fmt.Fprintf(w, "CPU: %.1f%% | RAM: %.1f%% | CONN: %d\n", cpu, ram, conns)
-	fmt.Fprintf(w, "PPS_IN: %d | DROP: %d | SQUEEZE: %d\n", ppsIn, ppsDrop, ppsSq)
-	fmt.Fprintln(w, strings.Repeat("-", 52))
+func writeDashboardLog(nowStr string, cpu, ram float64, conns, ppsIn, ppsDrop, ppsSq int) {
+	tempPath := logPath + ".tmp"
 	
-	// 1 Saatlik İstatistikler
-	fmt.Fprintf(w, "CPU_1H_MAX: %.1f%% (%s)\n", cpu1h, cpu1hTime)
-	fmt.Fprintf(w, "RAM_1H_MAX: %.1f%% (%s)\n", ram1h, ram1hTime)
-	fmt.Fprintf(w, "CONN_1H_MAX: %d (%s)\n", conn1h, conn1hTime)
-	fmt.Fprintf(w, "\n")
-	fmt.Fprintf(w, "PPS_IN_1H_MAX: %d (%s)\n", ppsIn1h, ppsIn1hTime)
-	fmt.Fprintf(w, "PPS_DROP_1H_MAX: %d (%s)\n", drop1h, drop1hTime)
-	fmt.Fprintf(w, "SQUEEZE_1H_MAX: %d (%s)\n", sq1h, sq1hTime)
-
-	// 24 Saatlik İstatistikler (EKSİKSİZ)
-	fmt.Fprintf(w, "\n--- 24H STATS ---\n")
-	fmt.Fprintf(w, "CPU_24H_MAX: %.1f%% (%s)\n", cpu24h, cpu24hTime)
-	fmt.Fprintf(w, "RAM_24H_MAX: %.1f%% (%s)\n", ram24h, ram24hTime)
-	fmt.Fprintf(w, "CONN_24H_MAX: %d (%s)\n", conn24h, conn24hTime)
-	fmt.Fprintf(w, "\n")
-	fmt.Fprintf(w, "PPS_IN_24H_MAX: %d (%s)\n", ppsIn24h, ppsIn24hTime)
-	fmt.Fprintf(w, "PPS_DROP_24H_MAX: %d (%s)\n", drop24h, drop24hTime)
-	fmt.Fprintf(w, "SQUEEZE_24H_MAX: %d (%s)\n", sq24h, sq24hTime)
+	var sb strings.Builder
 	
-	w.Flush()
+	// Helper for safe formatting
+	safeTime := func(s string) string {
+		if s == "" {
+			return "-"
+		}
+		return s
+	}
+
+	sb.WriteString("======================================================================\n")
+	sb.WriteString("                    R E S O U R C E   M O N I T O R                   \n")
+	sb.WriteString("======================================================================\n")
+	sb.WriteString(fmt.Sprintf("[%s] | GÜNCEL DURUM\n", time.Now().In(loc).Format("2006-01-02 15:04:05")))
+	sb.WriteString("----------------------------------------------------------------------\n")
+	sb.WriteString(fmt.Sprintf("CPU  : %6.1f%%       |  PPS IN  : %6d pkt/s\n", cpu, ppsIn))
+	sb.WriteString(fmt.Sprintf("RAM  : %6.1f%%       |  DROP    : %6d pkt/s\n", ram, ppsDrop))
+	sb.WriteString(fmt.Sprintf("CONN : %6d        |  SQUEEZE : %6d \n", conns, ppsSq))
+	sb.WriteString("----------------------------------------------------------------------\n")
+	sb.WriteString("[ 1 SAATLİK ZİRVELER ]                [ 24 SAATLİK ZİRVELER ]\n")
+	
+	sb.WriteString(fmt.Sprintf("CPU  : %6.1f%% (%-8s)            CPU  : %6.1f%% (%-8s)\n", 
+		stats1h.CPU.Max, safeTime(stats1h.CPU.MaxTime), stats24h.CPU.Max, safeTime(stats24h.CPU.MaxTime)))
+		
+	sb.WriteString(fmt.Sprintf("RAM  : %6.1f%% (%-8s)            RAM  : %6.1f%% (%-8s)\n", 
+		stats1h.RAM.Max, safeTime(stats1h.RAM.MaxTime), stats24h.RAM.Max, safeTime(stats24h.RAM.MaxTime)))
+		
+	sb.WriteString(fmt.Sprintf("CONN : %6d (%-8s)            CONN : %6d (%-8s)\n", 
+		stats1h.Conn.Max, safeTime(stats1h.Conn.MaxTime), stats24h.Conn.Max, safeTime(stats24h.Conn.MaxTime)))
+
+	sb.WriteString(fmt.Sprintf("PPS  : %6d (%-8s)            PPS  : %6d (%-8s)\n", 
+		stats1h.PPSIn.Max, safeTime(stats1h.PPSIn.MaxTime), stats24h.PPSIn.Max, safeTime(stats24h.PPSIn.MaxTime)))
+		
+	sb.WriteString(fmt.Sprintf("DROP : %6d (%-8s)            DROP : %6d (%-8s)\n", 
+		stats1h.PPSDrop.Max, safeTime(stats1h.PPSDrop.MaxTime), stats24h.PPSDrop.Max, safeTime(stats24h.PPSDrop.MaxTime)))
+		
+	sb.WriteString(fmt.Sprintf("SQZ  : %6d (%-8s)            SQZ  : %6d (%-8s)\n", 
+		stats1h.PPSSq.Max, safeTime(stats1h.PPSSq.MaxTime), stats24h.PPSSq.Max, safeTime(stats24h.PPSSq.MaxTime)))
+		
+	sb.WriteString("======================================================================\n")
+
+	// Atomik yazdırma işlemi (Titremeyi önler)
+	err := os.WriteFile(tempPath, []byte(sb.String()), 0644)
+	if err == nil {
+		os.Rename(tempPath, logPath)
+	}
 }
 
-// Linux /proc/net/sockstat okur (Hızlıdır, CPU harcamaz)
+// Linux /proc/net/sockstat okur
 func getConnectionCount() int {
 	data, err := ioutil.ReadFile("/proc/net/sockstat")
-	if err != nil { return 0 }
+	if err != nil {
+		return 0
+	}
 	lines := strings.Split(string(data), "\n")
 	for _, line := range lines {
 		if strings.HasPrefix(line, "TCP:") {
@@ -183,8 +238,10 @@ func getConnectionCount() int {
 // Linux /proc/net/softnet_stat okur
 func getSoftnetStats() (int, int, int) {
 	data, err := ioutil.ReadFile("/proc/net/softnet_stat")
-	if err != nil { return 0, 0, 0 }
-	
+	if err != nil {
+		return 0, 0, 0
+	}
+
 	total, drop, sq := 0, 0, 0
 	lines := strings.Split(string(data), "\n")
 	for _, line := range lines {
@@ -204,8 +261,10 @@ func getSoftnetStats() (int, int, int) {
 // Basit RAM kullanımı (/proc/meminfo)
 func getRamUsage() float64 {
 	data, err := ioutil.ReadFile("/proc/meminfo")
-	if err != nil { return 0 }
-	
+	if err != nil {
+		return 0
+	}
+
 	var total, available float64
 	lines := strings.Split(string(data), "\n")
 	for _, line := range lines {
@@ -229,12 +288,16 @@ var prevIdleTime, prevTotalTime float64
 // /proc/stat okuyarak CPU hesaplar (psutil olmadan)
 func getCPUUsage() float64 {
 	data, err := ioutil.ReadFile("/proc/stat")
-	if err != nil { return 0 }
-	
+	if err != nil {
+		return 0
+	}
+
 	lines := strings.Split(string(data), "\n")
 	fields := strings.Fields(lines[0])
-	
-	if len(fields) < 5 { return 0 }
+
+	if len(fields) < 5 {
+		return 0
+	}
 
 	idle, _ := strconv.ParseFloat(fields[4], 64)
 	total := 0.0
@@ -245,24 +308,12 @@ func getCPUUsage() float64 {
 
 	diffIdle := idle - prevIdleTime
 	diffTotal := total - prevTotalTime
-	
+
 	prevIdleTime = idle
 	prevTotalTime = total
 
-	if diffTotal == 0 { return 0 }
+	if diffTotal == 0 {
+		return 0
+	}
 	return 100 * (1 - (diffIdle / diffTotal))
-}
-
-func resetStats1h() {
-	cpu1h = 0; ram1h = 0; conn1h = 0
-	ppsIn1h = 0; drop1h = 0; sq1h = 0
-	cpu1hTime = ""; ram1hTime = ""; conn1hTime = ""
-	ppsIn1hTime = ""; drop1hTime = ""; sq1hTime = ""
-}
-
-func resetStats24h() {
-	cpu24h = 0; ram24h = 0; conn24h = 0
-	ppsIn24h = 0; drop24h = 0; sq24h = 0
-	cpu24hTime = ""; ram24hTime = ""; conn24hTime = ""
-	ppsIn24hTime = ""; drop24hTime = ""; sq24hTime = ""
 }
