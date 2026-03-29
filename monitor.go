@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
@@ -76,7 +75,7 @@ var (
 	prevTotal, prevDrop, prevSq int = -1, -1, -1
 )
 
-const logPath = "/var/log/resource.log"
+const logPath = "/tmp/resource.log"
 
 func main() {
 	// 1. Saat dilimi ayarı (TRT)
@@ -89,9 +88,7 @@ func main() {
 	tStart1h = time.Now().In(loc)
 	tStart24h = time.Now().In(loc)
 	lastLog = time.Now().In(loc)
-
-	// Log klasörünü oluştur
-	_ = os.MkdirAll("/var/log", 0755)
+	prevTickTime := time.Now().In(loc)
 
 	// Isınma turu için ilk okuma
 	getSoftnetStats()
@@ -104,6 +101,13 @@ func main() {
 	for range ticker.C {
 		now := time.Now().In(loc)
 		nowStr := now.Format("15:04:05")
+		
+		// Geçen tam süreyi (milisaniye hassasiyetinde) hesapla
+		durationSec := now.Sub(prevTickTime).Seconds()
+		if durationSec <= 0 {
+			durationSec = 0.5 // Sıfıra bölünme koruması
+		}
+		prevTickTime = now
 
 		// 1. Verileri Topla
 		cpu := getCPUUsage()
@@ -111,12 +115,12 @@ func main() {
 		conns := getConnectionCount()
 		total, drop, sq := getSoftnetStats()
 
-		// PPS Hesapla (0.5 saniyede bir ölçtüğümüz için saniyelik değeri bulmak adına 2 ile çarpıyoruz)
+		// PPS Hesapla (Kusursuz ölçüm için geçen gerçek zamana bölüyoruz)
 		ppsIn, ppsDrop, ppsSq := 0, 0, 0
 		if prevTotal != -1 {
-			ppsIn = (total - prevTotal) * 2
-			ppsDrop = (drop - prevDrop) * 2
-			ppsSq = (sq - prevSq) * 2
+			ppsIn = int(float64(total - prevTotal) / durationSec)
+			ppsDrop = int(float64(drop - prevDrop) / durationSec)
+			ppsSq = int(float64(sq - prevSq) / durationSec)
 		}
 		
 		// Negatif koruması
@@ -218,7 +222,7 @@ func writeDashboardLog(nowStr string, cpu, ram float64, conns, ppsIn, ppsDrop, p
 
 // Linux /proc/net/sockstat okur
 func getConnectionCount() int {
-	data, err := ioutil.ReadFile("/proc/net/sockstat")
+	data, err := os.ReadFile("/proc/net/sockstat")
 	if err != nil {
 		return 0
 	}
@@ -237,7 +241,7 @@ func getConnectionCount() int {
 
 // Linux /proc/net/softnet_stat okur
 func getSoftnetStats() (int, int, int) {
-	data, err := ioutil.ReadFile("/proc/net/softnet_stat")
+	data, err := os.ReadFile("/proc/net/softnet_stat")
 	if err != nil {
 		return 0, 0, 0
 	}
@@ -260,7 +264,7 @@ func getSoftnetStats() (int, int, int) {
 
 // Basit RAM kullanımı (/proc/meminfo)
 func getRamUsage() float64 {
-	data, err := ioutil.ReadFile("/proc/meminfo")
+	data, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
 		return 0
 	}
@@ -287,7 +291,7 @@ var prevIdleTime, prevTotalTime float64
 
 // /proc/stat okuyarak CPU hesaplar (psutil olmadan)
 func getCPUUsage() float64 {
-	data, err := ioutil.ReadFile("/proc/stat")
+	data, err := os.ReadFile("/proc/stat")
 	if err != nil {
 		return 0
 	}

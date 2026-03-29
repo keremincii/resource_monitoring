@@ -1,1 +1,1 @@
-watch -n 1 cat /var/log/resource.log
+watch -n 1 cat /tmp/resource.log
