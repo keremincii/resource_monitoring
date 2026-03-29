@@ -111,12 +111,12 @@ func main() {
 		conns := getConnectionCount()
 		total, drop, sq := getSoftnetStats()
 
-		// PPS Hesapla
+		// PPS Hesapla (0.5 saniyede bir ölçtüğümüz için saniyelik değeri bulmak adına 2 ile çarpıyoruz)
 		ppsIn, ppsDrop, ppsSq := 0, 0, 0
 		if prevTotal != -1 {
-			ppsIn = total - prevTotal
-			ppsDrop = drop - prevDrop
-			ppsSq = sq - prevSq
+			ppsIn = (total - prevTotal) * 2
+			ppsDrop = (drop - prevDrop) * 2
+			ppsSq = (sq - prevSq) * 2
 		}
 		
 		// Negatif koruması
@@ -157,8 +157,8 @@ func main() {
 			tStart24h = time.Now().In(loc)
 		}
 
-		// 5. Log Yazma (Saniyede 1 kere)
-		if time.Since(lastLog).Seconds() >= 1.0 {
+		// 5. Log Yazma (Akıcı olması için ticker ile uyumlu 0.4 sn seçildi)
+		if time.Since(lastLog).Seconds() >= 0.4 {
 			writeDashboardLog(nowStr, cpu, ram, conns, ppsIn, ppsDrop, ppsSq)
 			lastLog = time.Now().In(loc)
 		}
