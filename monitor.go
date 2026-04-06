@@ -94,18 +94,18 @@ func main() {
 	getSoftnetStats()
 	getCPUUsage()
 
-	// 0.5 Saniyelik Ticker
-	ticker := time.NewTicker(500 * time.Millisecond)
+	// 2.0 Saniyelik Ticker (htop benzeri tutarlı ortalama için)
+	ticker := time.NewTicker(2000 * time.Millisecond)
 	defer ticker.Stop()
 
 	for range ticker.C {
 		now := time.Now().In(loc)
 		nowStr := now.Format("15:04:05")
 		
-		// Geçen tam süreyi (milisaniye hassasiyetinde) hesapla
+		// Geçen tam süreyi (saniye hassasiyetinde) hesapla
 		durationSec := now.Sub(prevTickTime).Seconds()
 		if durationSec <= 0 {
-			durationSec = 0.5 // Sıfıra bölünme koruması
+			durationSec = 2.0 // Sıfıra bölünme koruması
 		}
 		prevTickTime = now
 
